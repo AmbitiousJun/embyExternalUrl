@@ -87,6 +87,7 @@ async function transferPlaybackInfo(r) {
     cloneHeaders[key] = r.headersIn[key].replace(/"/g, '\\"');
     r.warn(`playbackinfo reuqest clone header ${key}: ${cloneHeaders[key]}`);
   }
+  // r.warn(`playbackinfo request body: ${r.requestText}`);
   const proxyUri = util.proxyUri(r.uri);
   r.warn(`playbackinfo proxy uri: ${proxyUri}`);
   const query = util.generateUrl(r, "", "").substring(1);
@@ -166,6 +167,7 @@ async function fetchAlistPathApi(alistApiPath, alistFilePath, alistToken) {
   const alistRequestBody = {
     path: alistFilePath,
     password: "",
+    refresh: true
   };
   try {
     const response = await ngx.fetch(alistApiPath, {
