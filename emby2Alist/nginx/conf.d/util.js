@@ -5,6 +5,9 @@ function proxyUri(uri) {
 }
 
 function appendUrlArg(u, k, v) {
+  if (u.includes(k)) {
+    return u;
+  }
   return u + (u.includes("?") ? "&" : "?") + `${k}=${v}`;
 }
 

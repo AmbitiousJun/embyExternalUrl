@@ -70,8 +70,8 @@ async function redirect2Pan(r) {
         return;
       }
     }
-    r.warn(`fail to fetch alist resource: not found`);
-    return r.return(404);
+    r.warn(`fail to fetch alist resource: not found, use origin stream`);
+    return r.return(302, util.getEmbyOriginRequestUrl(r));
   }
   r.error(alistRes);
   r.return(500, alistRes);
@@ -80,22 +80,11 @@ async function redirect2Pan(r) {
 
 // 拦截 PlaybackInfo 请求，防止客户端转码（转容器）
 async function transferPlaybackInfo(r) {
-  // replay the request
-  const cloneHeaders = {};
-  for (const key in r.headersIn) {
-    r.warn(`playbackinfo request header ${key}: ${r.headersIn[key]}`);
-    cloneHeaders[key] = r.headersIn[key].replace(/"/g, '\\"');
-    r.warn(`playbackinfo reuqest clone header ${key}: ${cloneHeaders[key]}`);
-  }
-  // r.warn(`playbackinfo request body: ${r.requestText}`);
   const proxyUri = util.proxyUri(r.uri);
-  r.warn(`playbackinfo proxy uri: ${proxyUri}`);
   const query = util.generateUrl(r, "", "").substring(1);
-  r.warn(`playbackinfo proxy query string: ${query}`);
   const response = await r.subrequest(proxyUri, {
     method: r.method,
-    args: query,
-    headers: cloneHeaders
+    args: query
   });
   const body = JSON.parse(response.responseText);
   if (
@@ -130,15 +119,6 @@ async function transferPlaybackInfo(r) {
         "Static",
         "true"
       );
-      // check if it is local resource
-      const panRes = await r.subrequest(source.DirectStreamUrl, {
-        method: "GET",
-      });
-      if (panRes.status === 404) {
-        // local resource, change url to origin
-        r.warn(`local resource playbackinfo, proxy url to origin`);
-        source.DirectStreamUrl = util.proxyUri(source.DirectStreamUrl);
-      }
       r.warn(`remove transcode config`);
       source.SupportsTranscoding = false;
       if (source.TranscodingUrl) {
@@ -160,7 +140,7 @@ async function transferPlaybackInfo(r) {
     return r.return(200, bodyJson);
   }
   r.warn("playbackinfo subrequest failed");
-  return r.return(302, util.getEmbyOriginRequestUrl(r));
+  return r.internalRedirect(util.proxyUri(r.uri));
 }
 
 async function fetchAlistPathApi(alistApiPath, alistFilePath, alistToken) {
