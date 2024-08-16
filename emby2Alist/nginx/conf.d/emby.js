@@ -8,6 +8,7 @@ async function redirect2Pan(r) {
   const alistToken = config.alistToken;
   const alistAddr = config.alistAddr;
   const alistPublicAddr = config.alistPublicAddr;
+  const emby2AlistRootMap = config.emby2AlistRootMap;
   //fetch mount emby/jellyfin file path
   const itemInfo = util.getItemInfo(r);
   r.warn(`itemInfoUri: ${itemInfo.itemInfoUri}`);
@@ -20,7 +21,18 @@ async function redirect2Pan(r) {
   r.warn(`mount emby file path: ${embyRes}`);
 
   //fetch alist direct link
-  const alistFilePath = embyRes.replace(embyMountPath, "");
+  let alistFilePath = embyRes.replace(embyMountPath, "");
+
+  // emby 路径映射到 alist
+  if (emby2AlistRootMap) {
+    for (const key in emby2AlistRootMap) {
+      if (alistFilePath.startsWith(key)) {
+        alistFilePath = alistFilePath.replace(key, emby2AlistRootMap[key]);
+        break;
+      }
+    }
+  }
+
   const alistFsGetApiPath = `${alistAddr}/api/fs/get`;
   let alistRes = await fetchAlistPathApi(
     alistFsGetApiPath,
@@ -71,7 +83,7 @@ async function redirect2Pan(r) {
       }
     }
     r.warn(`fail to fetch alist resource: not found, use origin stream`);
-    return r.return(302, util.getEmbyOriginRequestUrl(r));
+    return r.return(307, util.getEmbyOriginRequestUrl(r));
   }
   r.error(alistRes);
   r.return(500, alistRes);

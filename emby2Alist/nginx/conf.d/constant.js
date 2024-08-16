@@ -5,6 +5,15 @@
 const embyHost = "http://172.17.0.1:8096";
 // rclone 的挂载目录, 例如将od, gd挂载到/mnt目录下:  /mnt/onedrive  /mnt/gd ,那么这里 就填写 /mnt
 const embyMountPath = "/mnt";
+// emby 磁盘目录 映射到 alist 根目录, 如果两者是一一对应的, 则不需要配置映射
+const emby2AlistRootMap = {
+  "/movie": "/电影",
+  "/music": "/音乐",
+  "/show": "/综艺",
+  "/series": "/电视剧",
+  "/sport": "/运动",
+  "/animation": "/动漫"
+};
 // alist token, 在alist后台查看
 const alistToken = "alsit-123456";
 // 访问宿主机上5244端口的alist地址, 要注意iptables给容器放行端口
@@ -17,6 +26,7 @@ const alistPublicAddr = "http://youralist.com:5244";
 export default {
   embyHost,
   embyMountPath,
+  emby2AlistRootMap,
   alistToken,
   alistAddr,
   embyApiKey,
