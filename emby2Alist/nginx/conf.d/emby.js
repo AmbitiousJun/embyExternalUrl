@@ -5,24 +5,24 @@ import util from "./util.js";
 
 async function redirect2Pan(r) {
   const embyMountPath = config.embyMountPath;
-  const alistToken = config.alistToken;
-  const alistAddr = config.alistAddr;
   const alistPublicAddr = config.alistPublicAddr;
   const emby2AlistRootMap = config.emby2AlistRootMap;
-  //fetch mount emby/jellyfin file path
+
+  // fetch mount emby/jellyfin file path
   const itemInfo = util.getItemInfo(r);
   r.warn(`itemInfoUri: ${itemInfo.itemInfoUri}`);
   const embyRes = await fetchEmbyFilePath(itemInfo.itemInfoUri, itemInfo.Etag);
-  if (embyRes.startsWith("error")) {
-    r.error(embyRes);
-    r.return(500, embyRes);
-    return;
+
+  if (embyRes.code !== 200) {
+    r.error(embyRes.msg);
+    return r.return(embyRes.code, embyRes.msg);
   }
-  r.warn(`mount emby file path: ${embyRes}`);
 
-  //fetch alist direct link
-  let alistFilePath = embyRes.replace(embyMountPath, "");
+  const embyPath = embyRes.data;
+  r.warn(`mount emby file path: ${embyPath}`);
 
+  // fetch alist direct link
+  let alistFilePath = embyPath.replace(embyMountPath, "");
   // emby 路径映射到 alist
   if (emby2AlistRootMap) {
     for (const key in emby2AlistRootMap) {
@@ -33,61 +33,55 @@ async function redirect2Pan(r) {
     }
   }
 
-  const alistFsGetApiPath = `${alistAddr}/api/fs/get`;
-  let alistRes = await fetchAlistPathApi(
-    alistFsGetApiPath,
-    alistFilePath,
-    alistToken
-  );
-  if (!alistRes.startsWith("error")) {
-    alistRes = alistRes.includes("http://172.17.0.1")
-      ? alistRes.replace("http://172.17.0.1", alistPublicAddr)
-      : alistRes;
-    r.warn(`redirect to: ${alistRes}`);
-    r.return(302, alistRes);
-    return;
+  const alistRes = await fetchAlistApi('/api/fs/get', 'POST', { 
+    refresh: true, 
+    password: '', 
+    path: alistFilePath 
+  });
+
+  if (alistRes.code === 200) {
+    const link = alistRes.data.raw_url.replace('http://172.17.0.1', alistPublicAddr);
+    r.warn(`redirect to: ${link}`);
+    return r.return(302, link);
   }
-  if (alistRes.startsWith("error403")) {
-    r.error(alistRes);
-    r.return(403, alistRes);
-    return;
+
+  if (alistRes.code === 403) {
+    r.error(alistRes.msg);
+    return r.return(403, alistRes.msg);
   }
-  if (alistRes.startsWith("error500")) {
-    const filePath = alistFilePath.substring(alistFilePath.indexOf("/", 1));
-    const alistFsListApiPath = `${alistAddr}/api/fs/list`;
-    const foldersRes = await fetchAlistPathApi(
-      alistFsListApiPath,
-      "/",
-      alistToken
-    );
-    if (foldersRes.startsWith("error")) {
-      r.error(foldersRes);
-      r.return(500, foldersRes);
-      return;
+
+  const filePath = alistFilePath.substring(alistFilePath.indexOf("/", 1));
+  const foldersRes = await fetchAlistApi('/api/fs/list', 'POST', {
+     refresh: true, 
+     password: '', 
+     path: '/' 
+  });
+
+  if (foldersRes.code !== 200) {
+    r.error(foldersRes.msg);
+    return r.return(foldersRes.code, foldersRes.msg);
+  }
+
+  const folders = foldersRes.data.content
+                                 .filter(item => item.is_dir)
+                                 .map(item => item.name);
+  for (let i = 0; i < folders.length; i++) {
+    r.warn(`try to fetch alist path from /${folders[i]}${filePath}`);
+    const driverRes = await fetchAlistApi('/api/fs/get', 'POST', {
+      refresh: true,
+      password: '',
+      path: `/${folders[i]}${filePath}`
+    })
+
+    if (driverRes.code === 200) {
+      const link = driverRes.data.raw_url.replace('http://172.17.0.1', alistPublicAddr);
+      r.warn(`redirect to: ${link}`);
+      return r.return(302, link);
     }
-    const folders = foldersRes.split(",").sort();
-    for (let i = 0; i < folders.length; i++) {
-      r.warn(`try to fetch alist path from /${folders[i]}${filePath}`);
-      let driverRes = await fetchAlistPathApi(
-        alistFsGetApiPath,
-        `/${folders[i]}${filePath}`,
-        alistToken
-      );
-      if (!driverRes.startsWith("error")) {
-        driverRes = driverRes.includes("http://172.17.0.1")
-          ? driverRes.replace("http://172.17.0.1", alistPublicAddr)
-          : driverRes;
-        r.warn(`redirect to: ${driverRes}`);
-        r.return(302, driverRes);
-        return;
-      }
-    }
-    r.warn(`fail to fetch alist resource: not found, use origin stream`);
-    return r.return(307, util.getEmbyOriginRequestUrl(r));
   }
-  r.error(alistRes);
-  r.return(500, alistRes);
-  return;
+
+  r.warn(`fail to fetch alist resource: not found, use origin stream`);
+  return r.return(307, util.getEmbyOriginRequestUrl(r));
 }
 
 // 拦截 PlaybackInfo 请求，防止客户端转码（转容器）
@@ -99,98 +93,96 @@ async function transferPlaybackInfo(r) {
     args: query
   });
   const body = JSON.parse(response.responseText);
-  if (
-    response.status === 200 &&
-    body.MediaSources &&
-    body.MediaSources.length > 0
-  ) {
-    r.warn(`origin playbackinfo: ${response.responseText}`);
-    for (let i = 0; i < body.MediaSources.length; i++) {
-      const source = body.MediaSources[i];
-      if (source.IsRemote) {
-        // live streams are not blocked
-        return r.return(200, response.responseText);
-      }
-      r.warn(`modify direct play info`);
-      source.SupportsDirectPlay = true;
-      source.SupportsDirectStream = true;
-      source.DirectStreamUrl = util.addDefaultApiKey(
-        r,
-        util
-          .generateUrl(r, "", r.uri)
-          .replace("/emby/Items", "/videos")
-          .replace("PlaybackInfo", "stream.mp4")
-      );
-      source.DirectStreamUrl = util.appendUrlArg(
-        source.DirectStreamUrl,
-        "MediaSourceId",
-        source.Id
-      );
-      source.DirectStreamUrl = util.appendUrlArg(
-        source.DirectStreamUrl,
-        "Static",
-        "true"
-      );
-      r.warn(`remove transcode config`);
-      source.SupportsTranscoding = false;
-      if (source.TranscodingUrl) {
-        delete source.TranscodingUrl;
-        delete source.TranscodingSubProtocol;
-        delete source.TranscodingContainer;
-      }
-    }
-    for (const key in response.headersOut) {
-      if (key === "Content-Length") {
-        // auto generate content length
-        continue;
-      }
-      r.headersOut[key] = response.headersOut[key];
-    }
-    const bodyJson = JSON.stringify(body);
-    r.headersOut["Content-Type"] = "application/json;charset=utf-8";
-    r.warn(`transfer playbackinfo: ${bodyJson}`);
-    return r.return(200, bodyJson);
+
+  if (response.status !== 200) {
+    r.warn('Playbackinfo subrequest failed');
+    return r.return(307, util.getEmbyOriginRequestUrl(r));
   }
-  r.warn("playbackinfo subrequest failed");
-  return r.internalRedirect(util.proxyUri(r.uri));
+
+  if (!body.MediaSources || body.MediaSources.length === 0) {
+    r.warn('No media source found');
+    r.headersOut["Content-Type"] = "application/json;charset=utf-8";
+    return r.return(200, JSON.stringify(body));
+  }
+
+  for (let i = 0; i < body.MediaSources.length; i++) {
+    const source = body.MediaSources[i];
+    if (source.IsRemote) {
+      // live streams are not blocked
+      return r.return(200, response.responseText);
+    }
+
+    source.SupportsDirectPlay = true;
+    source.SupportsDirectStream = true;
+    source.DirectStreamUrl = util.addDefaultApiKey(
+      r,
+      util.generateUrl(r, "", r.uri)
+          .replace("/emby/Items", "/videos")
+          .replace("PlaybackInfo", "stream")
+    );
+    source.DirectStreamUrl = util.appendUrlArg(source.DirectStreamUrl, "MediaSourceId", source.Id);
+    source.DirectStreamUrl = util.appendUrlArg(source.DirectStreamUrl, "Static", "true");
+    r.warn(`Change direct play url to: ${source.DirectStreamUrl}`);
+
+    source.SupportsTranscoding = false;
+    if (source.TranscodingUrl) {
+      delete source.TranscodingUrl;
+      delete source.TranscodingSubProtocol;
+      delete source.TranscodingContainer;
+      r.warn(`Delete transcoding info`);
+    }
+  }
+
+  for (const key in response.headersOut) {
+    if (key === "Content-Length") {
+      // auto generate content length
+      continue;
+    }
+    r.headersOut[key] = response.headersOut[key];
+  }
+
+  const bodyJson = JSON.stringify(body);
+  r.headersOut["Content-Type"] = "application/json;charset=utf-8";
+  return r.return(200, bodyJson);
 }
 
-async function fetchAlistPathApi(alistApiPath, alistFilePath, alistToken) {
-  const alistRequestBody = {
-    path: alistFilePath,
-    password: "",
-    refresh: true
-  };
+/**
+ * 请求 alist 接口
+ * @param {string} route 请求地址
+ * @param {object} requestBody 请求体
+ * @param {string} method 请求方法
+ * @returns Promise<[request result object]>
+ */
+async function fetchAlistApi(route, method, requestBody) {
+  const host = config.alistAddr;
+  const token = config.alistToken;
   try {
-    const response = await ngx.fetch(alistApiPath, {
-      method: "POST",
+    const res = await ngx.fetch(`${host}${route}`, {
+      method,
       headers: {
         "Content-Type": "application/json;charset=utf-8",
-        Authorization: alistToken,
+        Authorization: token,
       },
       max_response_body_size: 65535,
-      body: JSON.stringify(alistRequestBody),
+      body: JSON.stringify(requestBody),
     });
-    if (response.ok) {
-      const result = await response.json();
-      if (result === null || result === undefined) {
-        return `error: alist_path_api response is null`;
-      }
-      if (result.message == "success") {
-        if (result.data.raw_url) {
-          return result.data.raw_url;
-        }
-        return result.data.content.map((item) => item.name).join(",");
-      }
-      if (result.code == 403) {
-        return `error403: alist_path_api ${result.message}`;
-      }
-      return `error500: alist_path_api ${result.code} ${result.message}`;
-    } else {
-      return `error: alist_path_api ${response.status} ${response.statusText}`;
+
+    if (!res.ok) {
+      return { code: 400, msg: `fetch alist api failed, route: ${route}, requestBody: ${requestBody}, host: ${host}, token: ${token}` }
     }
+
+    const result = await res.json();
+    if (result === null || result === undefined) {
+      return { code: 400, msg: `fetch alist api get empty result` };
+    }
+
+    if (result.code !== 200) {
+      return { code: result.code, msg: result.message };
+    }
+    
+    return { code: 200, data: result.data };
   } catch (error) {
-    return `error: alist_path_api fetchAlistFiled ${error}`;
+    return { code: 400, msg: `fetch alist api failed: ${error}` }
   }
 }
 
@@ -204,23 +196,26 @@ async function fetchEmbyFilePath(itemInfoUri, Etag) {
       },
       max_response_body_size: 65535,
     });
-    if (res.ok) {
-      const result = await res.json();
-      if (result === null || result === undefined) {
-        return `error: emby_api itemInfoUri response is null`;
-      }
-      if (Etag) {
-        const mediaSource = result.MediaSources.find((m) => m.ETag == Etag);
-        if (mediaSource && mediaSource.Path) {
-          return mediaSource.Path;
-        }
-      }
-      return result.MediaSources[0].Path;
-    } else {
-      return `error: emby_api ${res.status} ${res.statusText}`;
+
+    if (!res.ok) {
+      return { code: 400, msg: "Fetch emby item info api failed" }
     }
+
+    const result = await res.json();
+    if (result === null || result === undefined) {
+      return { code: 400, msg: "Fetch emby api get empty item info response" };
+    }
+
+    if (Etag) {
+      const mediaSource = result.MediaSources.find((m) => m.ETag == Etag);
+      if (mediaSource && mediaSource.Path) {
+        return { code: 200, data: mediaSource.Path }
+      }
+    }
+
+    return { code: 200, data: result.MediaSources[0].Path };
   } catch (error) {
-    return `error: emby_api fetch mediaItemInfo failed,  ${error}`;
+    return { code: 400, msg: `Fetch emby item info api failed: ${error}` }
   }
 }
 
