@@ -41,6 +41,36 @@ function getCurrentRequestUrl(r) {
   return addDefaultApiKey(r, generateUrl(r, "http://" + host, r.uri));
 }
 
+// 生成一个 指定 位的随机 id
+function randomId(n) {
+  if (typeof n !== 'number' || n < 0) {
+    return '';
+  }
+  const dict = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'];
+  let res = '';
+  for (let i = 1; i <= n; i++) {
+    res += dict[Math.floor(Math.random() * dict.length)];
+  }
+  return res;
+}
+
+// 判断一个变量是否为空, 或无意义状态
+function isEmpty(v) {
+  if (v === null || v === undefined) {
+    return true;
+  }
+  if (typeof v === 'object') {
+    const json = JSON.stringify(v);
+    if (json === '[]' || json === '{}') {
+      return true;
+    }
+  }
+  if (typeof v === 'string' && v.trim() === '') {
+    return true;
+  }
+  return false;
+}
+
 function getItemInfo(r) {
   const embyHost = config.embyHost;
   const embyApiKey = config.embyApiKey;
@@ -60,7 +90,8 @@ function getItemInfo(r) {
   } else {
     itemInfoUri = `${embyHost}/Items/${itemId}/PlaybackInfo?api_key=${api_key}`;
   }
-  return { itemId, mediaSourceId, Etag, api_key, itemInfoUri };
+  const videoPreviewFormat = r.args['video_preview_format'];
+  return { itemId, mediaSourceId, Etag, api_key, itemInfoUri, videoPreviewFormat };
 }
 
 export default {
@@ -71,4 +102,6 @@ export default {
   generateUrl,
   getCurrentRequestUrl,
   getEmbyOriginRequestUrl,
+  randomId,
+  isEmpty
 };

@@ -23,6 +23,14 @@ const embyApiKey = "f839390f50a648fd92108bc11ca6730a";
 // alist公网地址, 用于需要alist server代理流量的情况, 按需填写
 const alistPublicAddr = "http://youralist.com:5244";
 
+// 视频预览配置, 即获取视频直链时可以获取到由云盘转码完成的地址进行播放, 不保证所有客户端支持！！！
+const videoPreviewCfg = {
+  // 是否开启
+  enable: true,
+  // 对哪些视频容器启用该功能
+  containers: { "mp4": true, "mkv": true }
+}
+
 export default {
   embyHost,
   embyMountPath,
@@ -30,5 +38,6 @@ export default {
   alistToken,
   alistAddr,
   embyApiKey,
-  alistPublicAddr
+  alistPublicAddr,
+  videoPreviewCfg
 }
